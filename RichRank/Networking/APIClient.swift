@@ -52,18 +52,25 @@ actor APIClient {
     private let encoder: JSONEncoder
     private var token: String?
 
-    init(baseURL: URL? = nil, session: URLSession = .shared) {
+    init(baseURL: URL? = nil, session: URLSession? = nil) {
         let resolved: URL
         if let baseURL {
             resolved = baseURL
-        } else if let str = Bundle.main.object(forInfoDictionaryKey: "RankAPIBaseURL") as? String,
-                  let url = URL(string: str) {
-            resolved = url
         } else {
-            resolved = URL(string: "http://localhost:8000")!
+            resolved = Self.resolveBaseURL(fromPlist: Bundle.main.object(forInfoDictionaryKey: "RankAPIBaseURL") as? String)
         }
         self.baseURL = resolved
-        self.session = session
+#if DEBUG
+        print("Rank API base URL: \(resolved.absoluteString)")
+#endif
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 12
+            config.timeoutIntervalForResource = 20
+            self.session = URLSession(configuration: config)
+        }
 
         let dec = JSONDecoder()
         let enc = JSONEncoder()
@@ -83,6 +90,53 @@ actor APIClient {
         self.encoder = enc
     }
 
+    /// Picks the API base URL from Info.plist (`RankAPIBaseURL`), with safe fallbacks when the
+    /// value is empty, unparsed, or still contains an unexpanded `$(BUILD_SETTING)` placeholder.
+    private static func resolveBaseURL(fromPlist raw: String?) -> URL {
+        let resolved: URL
+        if let raw {
+            let str = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !str.isEmpty,
+               !str.contains("$("),
+               let url = URL(string: str),
+               url.host != nil {
+                resolved = url
+            } else {
+                resolved = fallbackBaseURL()
+            }
+        } else {
+            resolved = fallbackBaseURL()
+        }
+#if DEBUG
+        return normalizeLoopbackDevPort(resolved)
+#else
+        return resolved
+#endif
+    }
+
+    private static func fallbackBaseURL() -> URL {
+#if DEBUG
+        URL(string: "http://127.0.0.1:8000")!
+#else
+        URL(string: "http://98.84.78.7:8000")!
+#endif
+    }
+
+    /// Debug Docker API listens on :8000. Misconfigured xcconfig used to truncate URLs at `//`,
+    /// yielding `http://localhost` (port 80) — repair common mistakes.
+    private static func normalizeLoopbackDevPort(_ url: URL) -> URL {
+        guard let host = url.host?.lowercased() else { return url }
+        guard host == "localhost" || host == "127.0.0.1" else { return url }
+        guard url.scheme?.lowercased() == "http" else { return url }
+        let port = url.port
+        if port == nil || port == 80 {
+            guard var c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+            c.port = 8000
+            return c.url ?? url
+        }
+        return url
+    }
+
     func setToken(_ token: String?) {
         self.token = token
     }
@@ -91,12 +145,17 @@ actor APIClient {
 
     // MARK: - Auth
 
-    func signup(email: String, password: String, dob: Date) async throws -> TokenResponse {
-        struct Body: Encodable { let email: String; let password: String; let dob: Date }
+    func signup(username: String, email: String, password: String, dob: Date) async throws -> TokenResponse {
+        struct Body: Encodable {
+            let username: String
+            let email: String
+            let password: String
+            let dob: Date
+        }
         return try await request(
             "/auth/signup",
             method: "POST",
-            body: Body(email: email, password: password, dob: dob),
+            body: Body(username: username, email: email, password: password, dob: dob),
             authed: false
         )
     }
@@ -108,6 +167,31 @@ actor APIClient {
             method: "POST",
             body: Body(email: email, password: password),
             authed: false
+        )
+    }
+
+    func refresh(refreshToken: String) async throws -> TokenResponse {
+        struct Body: Encodable {
+            let refresh_token: String
+        }
+        return try await request(
+            "/auth/refresh",
+            method: "POST",
+            body: Body(refresh_token: refreshToken),
+            authed: false
+        )
+    }
+
+    func logout(refreshToken: String? = nil) async throws {
+        struct Body: Encodable {
+            let refresh_token: String?
+        }
+        let bodyData = try encoder.encode(Body(refresh_token: refreshToken))
+        let _: EmptyResponse = try await performRequest(
+            path: "/auth/logout",
+            method: "POST",
+            bodyData: bodyData,
+            authed: true
         )
     }
 
@@ -214,7 +298,7 @@ actor APIClient {
             throw APIError.server(status: http.statusCode, message: detail)
         }
 
-        if T.self == EmptyResponse.self {
+        if T.self == EmptyResponse.self, data.isEmpty || http.statusCode == 204 {
             return EmptyResponse() as! T
         }
         if data.isEmpty {

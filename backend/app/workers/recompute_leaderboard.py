@@ -21,6 +21,7 @@ def recompute_leaderboard() -> dict[str, int]:
     from app.config import get_settings
 
     r = redis.Redis.from_url(get_settings().redis_url, decode_responses=True)
+    lb.snapshot_current_ranks(r=r)
     lb.reset_all(r=r)
 
     with SyncSessionLocal() as session:

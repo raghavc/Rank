@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, limiter
 from app.config import get_settings
 from app.models import BankAccount, User
 from app.schemas.bank import BankAccountOut, BankLinkRequest, ConnectTokenResponse
+from app.services.connect_nonce import consume_connect_nonce, store_connect_nonce
 from app.services.crypto import encrypt
 from app.services.teller import TellerError, TellerTokenExpired, fetch_linkable_accounts
+from app.services.teller_connect_verify import (
+    load_ed25519_public_key_from_pem,
+    verify_enrollment_signatures,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -24,28 +30,80 @@ router = APIRouter(prefix="/bank", tags=["bank"])
 _ALLOWED_SUBTYPES = {"checking", "savings"}
 
 
-@router.post("/connect-token", response_model=ConnectTokenResponse)
-async def connect_token(_: User = Depends(get_current_user)) -> ConnectTokenResponse:
+async def _verify_connect_enrollment(
+    *,
+    body: BankLinkRequest,
+    current: User,
+) -> None:
     s = get_settings()
-    # Reject empty values AND the .env.example placeholder so the iOS app
-    # gets a clear 503 instead of a confusing "internal server error"
-    # surfacing inside Teller's hosted widget.
+    pem = s.teller_connect_signing_public_key_pem.strip()
+    if not pem:
+        return
+    try:
+        pk = load_ed25519_public_key_from_pem(pem)
+    except ValueError as e:
+        logger.exception("invalid TELLER_CONNECT_SIGNING_PUBLIC_KEY")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "server enrollment verification is misconfigured",
+        ) from e
+
+    nonce = (body.teller_nonce or "").strip()
+    uid = (body.teller_user_id or "").strip()
+    enr = (body.teller_enrollment_id or "").strip()
+    sigs = body.teller_signatures or []
+    if not nonce or not uid or not enr or not sigs:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "teller_nonce, teller_user_id, teller_enrollment_id, and teller_signatures are required",
+        )
+    if not await consume_connect_nonce(nonce=nonce, expected_user_id=str(current.id)):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid or expired connect nonce — request a new connect token",
+        )
+    if not verify_enrollment_signatures(
+        public_key=pk,
+        nonce=nonce,
+        access_token=body.teller_access_token,
+        teller_user_id=uid,
+        enrollment_id=enr,
+        environment=s.teller_environment,
+        signatures=sigs,
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "enrollment signature verification failed",
+        )
+
+
+@router.post("/connect-token", response_model=ConnectTokenResponse)
+async def connect_token(current: User = Depends(get_current_user)) -> ConnectTokenResponse:
+    s = get_settings()
     if not s.teller_app_id or s.teller_app_id == "your_teller_app_id":
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "TELLER_APP_ID not configured on the server",
         )
+    nonce: str | None = None
+    if s.teller_connect_signing_public_key_pem.strip():
+        nonce = secrets.token_urlsafe(24)
+        await store_connect_nonce(user_id=str(current.id), nonce=nonce)
     return ConnectTokenResponse(
-        application_id=s.teller_app_id, environment=s.teller_environment
+        application_id=s.teller_app_id, environment=s.teller_environment, nonce=nonce
     )
 
 
+@limiter.limit("10/minute")
 @router.post("/link", response_model=BankAccountOut, status_code=status.HTTP_201_CREATED)
 async def link_bank(
+    request: Request,
     body: BankLinkRequest,
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BankAccountOut:
+    await _verify_connect_enrollment(body=body, current=current)
+
     token = body.teller_access_token
     manual_id = (body.teller_account_id or "").strip() or None
 
@@ -132,7 +190,6 @@ async def link_bank(
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "account already linked")
 
-    # Fire an immediate background refresh for this user.
     try:
         from app.workers.refresh_balances import refresh_user_balance
 

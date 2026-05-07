@@ -1,5 +1,6 @@
 from app.models.balance import Balance, BalanceHistory
 from app.models.bank_account import BankAccount
+from app.models.refresh_token import RefreshToken
 from app.models.user import User
 
-__all__ = ["User", "BankAccount", "Balance", "BalanceHistory"]
+__all__ = ["User", "BankAccount", "Balance", "BalanceHistory", "RefreshToken"]

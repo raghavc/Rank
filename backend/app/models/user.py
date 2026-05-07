@@ -27,12 +27,16 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    token_version: Mapped[int] = mapped_column(default=0, nullable=False)
 
     bank_accounts: Mapped[list["BankAccount"]] = relationship(  # noqa: F821
         back_populates="user", cascade="all, delete-orphan"
     )
     balance: Mapped["Balance | None"] = relationship(  # noqa: F821
         back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(  # noqa: F821
+        back_populates="user", cascade="all, delete-orphan"
     )
 
     __table_args__ = (Index("idx_users_age_bucket", "age_bucket"),)

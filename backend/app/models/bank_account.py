@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, Uuid, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -20,9 +20,7 @@ class BankAccount(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    teller_account_id: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False
-    )
+    teller_account_id: Mapped[str] = mapped_column(String(255), nullable=False)
     teller_access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     institution_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     account_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -35,4 +33,7 @@ class BankAccount(Base):
 
     user: Mapped["User"] = relationship(back_populates="bank_accounts")  # noqa: F821
 
-    __table_args__ = (Index("idx_bank_accounts_user_id", "user_id"),)
+    __table_args__ = (
+        Index("idx_bank_accounts_user_id", "user_id"),
+        UniqueConstraint("user_id", "teller_account_id", name="uq_bank_accounts_user_teller_account"),
+    )

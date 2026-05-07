@@ -13,4 +13,12 @@ extension Color {
     static let rankMuted = Color.black.opacity(0.45)
     /// Fill behind subtle pills (toggle, etc.) — frosted-glass-ish.
     static let rankPillFill = Color.black.opacity(0.04)
+    /// Terminal board background.
+    static let rankTerminalCanvas = Color.white
+    /// Thin terminal row highlight.
+    static let rankTerminalRow = Color.black.opacity(0.035)
+    /// Primary board text.
+    static let rankTerminalText = Color.black.opacity(0.82)
+    /// Hairline rule color.
+    static let rankTerminalRule = Color.black.opacity(0.10)
 }

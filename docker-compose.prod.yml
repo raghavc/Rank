@@ -1,0 +1,55 @@
+# Production Compose — uses RDS for Postgres, Redis runs locally on EC2.
+#
+# Deploy:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# Run migrations:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod exec api alembic upgrade head
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./backend
+    env_file: .env.prod
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+
+  worker:
+    build:
+      context: ./backend
+    env_file: .env.prod
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker --loglevel=info
+
+  beat:
+    build:
+      context: ./backend
+    env_file: .env.prod
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app beat --loglevel=info

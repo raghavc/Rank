@@ -12,6 +12,9 @@ nonisolated struct TellerEnrollment: Sendable {
     var institutionName: String?
     var lastFour: String?
     var subtype: String?
+    var tellerUserId: String?
+    var tellerEnrollmentId: String?
+    var tellerSignatures: [String]?
 }
 
 nonisolated enum TellerConnectResult: Sendable {
@@ -20,11 +23,23 @@ nonisolated enum TellerConnectResult: Sendable {
     case failure(String)
 }
 
+private enum TellerConnectParseError: LocalizedError, Sendable {
+    case message(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .message(let s): return s
+        }
+    }
+}
+
 /// SwiftUI sheet that hosts Teller Connect inside a WKWebView and dispatches
 /// the enrollment payload back to the caller via `onResult`.
 struct TellerConnectSheet: View {
     let applicationId: String
     let environment: String
+    /// Server-issued nonce from ``/bank/connect-token``; required when the API verifies Connect signatures.
+    let connectNonce: String?
     let onResult: (TellerConnectResult) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -34,6 +49,7 @@ struct TellerConnectSheet: View {
             TellerConnectWebView(
                 applicationId: applicationId,
                 environment: environment,
+                connectNonce: connectNonce,
                 onResult: { result in
                     onResult(result)
                     dismiss()
@@ -60,6 +76,7 @@ struct TellerConnectSheet: View {
 private struct TellerConnectWebView: UIViewRepresentable {
     let applicationId: String
     let environment: String
+    let connectNonce: String?
     let onResult: (TellerConnectResult) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -76,10 +93,12 @@ private struct TellerConnectWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.scrollView.bounces = false
+#if DEBUG
         webView.isInspectable = true
-        context.coordinator.hostWebView = webView
+#endif
+        context.coordinator.attachHost(webView)
 
-        let html = makeHTML(applicationId: applicationId, environment: environment)
+        let html = makeHTML(applicationId: applicationId, environment: environment, connectNonce: connectNonce)
         webView.loadHTMLString(html, baseURL: URL(string: "https://teller.io"))
         return webView
     }
@@ -93,6 +112,10 @@ private struct TellerConnectWebView: UIViewRepresentable {
 
         init(onResult: @escaping (TellerConnectResult) -> Void) {
             self.onResult = onResult
+        }
+
+        func attachHost(_ webView: WKWebView) {
+            hostWebView = webView
         }
 
         /// After the document (and sync `connect.js`) loads, open Connect from native so startup order
@@ -127,8 +150,8 @@ private struct TellerConnectWebView: UIViewRepresentable {
             switch envelopeResult {
             case .success(let d):
                 dict = d
-            case .failure(let reason):
-                finish(.failure(reason))
+            case .failure(let err):
+                finish(.failure(err.errorDescription ?? String(describing: err)))
                 return
             }
 
@@ -138,8 +161,8 @@ private struct TellerConnectWebView: UIViewRepresentable {
                 switch unpackEnrollment(dict) {
                 case .success(let enrollment):
                     finish(.success(enrollment))
-                case .failure(let reason):
-                    finish(.failure(reason))
+                case .failure(let err):
+                    finish(.failure(err.errorDescription ?? String(describing: err)))
                 }
 
             case "exit", "cancel":
@@ -158,21 +181,21 @@ private struct TellerConnectWebView: UIViewRepresentable {
         }
 
         /// Parse `postMessage` body: prefers JSON **string** (stable across WK versions), falls back to dict.
-        private func parseEnvelope(_ body: Any) -> Result<[String: Any], String> {
+        private func parseEnvelope(_ body: Any) -> Result<[String: Any], TellerConnectParseError> {
             if let str = body as? String {
                 guard let data = str.data(using: .utf8) else {
-                    return .failure("Native bridge payload was not valid UTF-8")
+                    return .failure(.message("Native bridge payload was not valid UTF-8"))
                 }
                 do {
                     let obj = try JSONSerialization.jsonObject(with: data, options: [])
                     guard let map = obj as? [String: Any] else {
-                        return .failure(
+                        return .failure(.message(
                             "Native bridge JSON was not an object — try restarting the sheet"
-                        )
+                        ))
                     }
                     return .success(map)
                 } catch {
-                    return .failure("Malformed native bridge JSON: \(error.localizedDescription)")
+                    return .failure(.message("Malformed native bridge JSON: \(error.localizedDescription)"))
                 }
             }
             if let d = body as? [String: Any] {
@@ -186,16 +209,16 @@ private struct TellerConnectWebView: UIViewRepresentable {
                     }
                 }
                 return out.isEmpty
-                    ? .failure("Could not read native bridge message (unrecognized dictionary keys)")
+                    ? .failure(.message("Could not read native bridge message (unrecognized dictionary keys)"))
                     : .success(out)
             }
-            return .failure(
+            return .failure(.message(
                 "Could not read native bridge message (expected JSON string or object)"
-            )
+            ))
         }
 
         private func unpackEnrollment(_ envelope: [String: Any])
-            -> Result<TellerEnrollment, String>
+            -> Result<TellerEnrollment, TellerConnectParseError>
         {
             if let jsonStr = envelope["payload_json"] as? String {
                 return parseEnrollmentJSONString(jsonStr)
@@ -203,21 +226,21 @@ private struct TellerConnectWebView: UIViewRepresentable {
             if let nested = envelope["payload"] as? [String: Any] {
                 return parseEnrollmentObject(nested)
             }
-            return .failure(
+            return .failure(.message(
                 "Connect reported success but the native envelope had no enrollment data"
-            )
+            ))
         }
 
         private func parseEnrollmentJSONString(_ jsonUtf8: String)
-            -> Result<TellerEnrollment, String>
+            -> Result<TellerEnrollment, TellerConnectParseError>
         {
             guard let data = jsonUtf8.data(using: .utf8) else {
-                return .failure("Enrollment JSON was not valid UTF-8")
+                return .failure(.message("Enrollment JSON was not valid UTF-8"))
             }
             do {
                 let obj = try JSONSerialization.jsonObject(with: data, options: [])
                 guard var map = obj as? [String: Any] else {
-                    return .failure("Malformed enrollment JSON: root was not an object")
+                    return .failure(.message("Malformed enrollment JSON: root was not an object"))
                 }
                 if enrollmentAccessToken(in: map) == nil {
                     if let inner = map["payload"] as? [String: Any] {
@@ -228,7 +251,7 @@ private struct TellerConnectWebView: UIViewRepresentable {
                 }
                 return parseEnrollmentObject(map)
             } catch {
-                return .failure("Malformed enrollment JSON: \(error.localizedDescription)")
+                return .failure(.message("Malformed enrollment JSON: \(error.localizedDescription)"))
             }
         }
 
@@ -251,7 +274,7 @@ private struct TellerConnectWebView: UIViewRepresentable {
         }
 
         private func parseEnrollmentObject(_ p: [String: Any])
-            -> Result<TellerEnrollment, String>
+            -> Result<TellerEnrollment, TellerConnectParseError>
         {
             func str(_ obj: Any?) -> String? {
                 guard let obj else { return nil }
@@ -263,7 +286,7 @@ private struct TellerConnectWebView: UIViewRepresentable {
             }
 
             guard let token = enrollmentAccessToken(in: p) else {
-                return .failure("Connect succeeded but enrollment JSON was missing accessToken")
+                return .failure(.message("Connect succeeded but enrollment JSON was missing accessToken"))
             }
 
             var institutionName: String?
@@ -313,12 +336,27 @@ private struct TellerConnectWebView: UIViewRepresentable {
                 }
             }
 
+            let tellerUserId = str((p["user"] as? [String: Any])?["id"])
+            let tellerEnrollmentId = str((p["enrollment"] as? [String: Any])?["id"])
+            let tellerSignatures: [String]? = {
+                guard let raw = p["signatures"] as? [Any] else { return nil }
+                let out = raw.compactMap { el -> String? in
+                    if let s = el as? String { return s }
+                    if let n = el as? NSNumber { return n.stringValue }
+                    return nil
+                }
+                return out.isEmpty ? nil : out
+            }()
+
             let enrollment = TellerEnrollment(
                 accessToken: token,
                 accountId: accountId,
                 institutionName: institutionName,
                 lastFour: lastFour,
-                subtype: subtype
+                subtype: subtype,
+                tellerUserId: tellerUserId,
+                tellerEnrollmentId: tellerEnrollmentId,
+                tellerSignatures: tellerSignatures
             )
             return .success(enrollment)
         }
@@ -331,8 +369,14 @@ private struct TellerConnectWebView: UIViewRepresentable {
     }
 }
 
-private func makeHTML(applicationId: String, environment: String) -> String {
-    """
+private func makeHTML(applicationId: String, environment: String, connectNonce: String?) -> String {
+    let nonceFragment: String = {
+        guard let raw = connectNonce?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return ""
+        }
+        return ",\n            nonce: \(jsString(raw))"
+    }()
+    return """
     <!doctype html>
     <html>
     <head>
@@ -372,7 +416,7 @@ private func makeHTML(applicationId: String, environment: String) -> String {
         } else {
           var connect = TellerConnect.setup({
             applicationId: \(jsString(applicationId)),
-            environment: \(jsString(environment)),
+            environment: \(jsString(environment))\(nonceFragment),
             products: ['balance'],
             onInit: function() {
               var el = document.getElementById('status');

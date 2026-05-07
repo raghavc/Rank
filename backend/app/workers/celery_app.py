@@ -22,14 +22,18 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    timezone="UTC",
+    timezone="America/New_York",
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     beat_schedule={
         "refresh-all-balances-daily": {
             "task": "app.workers.refresh_balances.refresh_all_balances",
-            "schedule": crontab(hour=4, minute=0),
+            "schedule": crontab(hour=8, minute=0),
+        },
+        "recompute-leaderboard-daily": {
+            "task": "app.workers.recompute_leaderboard.recompute_leaderboard",
+            "schedule": crontab(hour=8, minute=5),
         },
     },
 )

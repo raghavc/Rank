@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ConnectTokenResponse(BaseModel):
     application_id: str
     environment: str
+    nonce: str | None = None
 
 
 class BankLinkRequest(BaseModel):
@@ -18,8 +19,9 @@ class BankLinkRequest(BaseModel):
     *checking* or *savings* account — mirroring Connect's behaviour when multiple
     accounts are enrolled under the same access token.
 
-    Passing `teller_account_id` + `account_subtype` directly is kept for backwards
-    compatibility or future clients that already enumerated accounts locally.
+    When ``TELLER_CONNECT_SIGNING_PUBLIC_KEY`` is configured, you must pass the
+    Connect ``nonce`` (from ``/bank/connect-token``) plus enrollment ``signatures``,
+    ``teller_user_id``, and ``teller_enrollment_id`` from the Connect success payload.
     """
 
     teller_access_token: str = Field(min_length=1)
@@ -27,7 +29,12 @@ class BankLinkRequest(BaseModel):
     institution_name: str | None = None
     last_four: str | None = None
     account_type: str | None = Field(default="depository")
-    account_subtype: str | None = None  # "checking" | "savings" — inferred server-side when omitted
+    account_subtype: str | None = None
+
+    teller_nonce: str | None = None
+    teller_user_id: str | None = None
+    teller_enrollment_id: str | None = None
+    teller_signatures: list[str] | None = None
 
 
 class BankAccountOut(BaseModel):

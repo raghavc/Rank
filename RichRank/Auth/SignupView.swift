@@ -3,6 +3,7 @@ import SwiftUI
 struct SignupView: View {
     @Environment(AppState.self) private var app
 
+    @State private var username: String = ""
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var dob: Date = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
@@ -35,6 +36,13 @@ struct SignupView: View {
                 .padding(.top, 8)
 
             VStack(spacing: 16) {
+                fieldLabel("Username")
+                TextField("dady", text: $username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.username)
+                    .styledField()
+
                 fieldLabel("Email")
                 TextField("you@example.com", text: $email)
                     .textInputAutocapitalization(.never)
@@ -69,7 +77,12 @@ struct SignupView: View {
                 }
             }
             .buttonStyle(.rankPrimary)
-            .disabled(isSubmitting || email.isEmpty || password.count < 8)
+            .disabled(
+                isSubmitting ||
+                username.trimmingCharacters(in: .whitespacesAndNewlines).count < 3 ||
+                email.isEmpty ||
+                password.count < 8
+            )
             .padding(.bottom, 24)
         }
         .padding(.horizontal, 28)
@@ -89,7 +102,12 @@ struct SignupView: View {
         isSubmitting = true
         Task {
             do {
-                let token = try await app.signUp(email: email, password: password, dob: dob)
+                let token = try await app.signUp(
+                    username: username,
+                    email: email,
+                    password: password,
+                    dob: dob
+                )
                 revealedHandle = token.username
             } catch {
                 errorMessage = (error as? APIError)?.localizedDescription ?? error.localizedDescription

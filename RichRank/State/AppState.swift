@@ -38,7 +38,25 @@ final class AppState {
                     await refreshLinkedAccounts()
                 }
             } catch APIError.unauthorized {
-                await logout()
+                if let rt = KeychainHelper.loadRefreshToken() {
+                    do {
+                        let t = try await api.refresh(refreshToken: rt)
+                        KeychainHelper.saveToken(t.accessToken)
+                        KeychainHelper.saveRefreshToken(t.refreshToken)
+                        await api.setToken(t.accessToken)
+                        let me = try await api.me()
+                        self.me = me
+                        self.route = me.hasBankLinked ? .leaderboard : .connectBank
+                        if me.hasBankLinked {
+                            await refreshLeaderboards()
+                            await refreshLinkedAccounts()
+                        }
+                    } catch {
+                        await logout()
+                    }
+                } else {
+                    await logout()
+                }
             } catch {
                 self.lastError = (error as? APIError)?.localizedDescription ?? error.localizedDescription
             }
@@ -49,9 +67,10 @@ final class AppState {
 
     // MARK: - Auth
 
-    func signUp(email: String, password: String, dob: Date) async throws -> TokenResponse {
-        let token = try await api.signup(email: email, password: password, dob: dob)
+    func signUp(username: String, email: String, password: String, dob: Date) async throws -> TokenResponse {
+        let token = try await api.signup(username: username, email: email, password: password, dob: dob)
         KeychainHelper.saveToken(token.accessToken)
+        KeychainHelper.saveRefreshToken(token.refreshToken)
         await api.setToken(token.accessToken)
         self.me = Me(username: token.username, ageBucket: token.ageBucket, hasBankLinked: false)
         return token
@@ -60,6 +79,7 @@ final class AppState {
     func logIn(email: String, password: String) async throws {
         let token = try await api.login(email: email, password: password)
         KeychainHelper.saveToken(token.accessToken)
+        KeychainHelper.saveRefreshToken(token.refreshToken)
         await api.setToken(token.accessToken)
         let me = try await api.me()
         self.me = me
@@ -71,6 +91,7 @@ final class AppState {
     }
 
     func logout() async {
+        try? await api.logout(refreshToken: nil)
         KeychainHelper.deleteToken()
         await api.setToken(nil)
         self.me = nil
@@ -94,7 +115,11 @@ final class AppState {
         accountId: String?,
         institutionName: String?,
         lastFour: String?,
-        subtype: String?
+        subtype: String?,
+        tellerNonce: String?,
+        tellerUserId: String?,
+        tellerEnrollmentId: String?,
+        tellerSignatures: [String]?
     ) async throws {
         let req = BankLinkRequest(
             tellerAccessToken: accessToken,
@@ -102,7 +127,11 @@ final class AppState {
             institutionName: institutionName,
             lastFour: lastFour,
             accountType: accountId == nil ? nil : "depository",
-            accountSubtype: subtype
+            accountSubtype: subtype,
+            tellerNonce: tellerNonce,
+            tellerUserId: tellerUserId,
+            tellerEnrollmentId: tellerEnrollmentId,
+            tellerSignatures: tellerSignatures
         )
         _ = try await api.linkBank(req)
         if let me {
@@ -143,6 +172,7 @@ final class AppState {
 
     func refresh(scope: LeaderboardScope) async {
         do {
+            lastError = nil
             let snap = try await api.leaderboard(scope: scope, limit: 100)
             let mine = try await api.leaderboardMe(scope: scope)
             switch scope {
@@ -157,7 +187,30 @@ final class AppState {
             await logout()
         } catch {
             self.lastError = (error as? APIError)?.localizedDescription ?? error.localizedDescription
+            let empty = LeaderboardSnapshot(scope: scope.rawValue, totalUsers: 0, entries: [])
+            switch scope {
+            case .global:
+                if self.globalBoard == nil {
+                    self.globalBoard = empty
+                }
+            case .age:
+                if self.ageBoard == nil {
+                    self.ageBoard = empty
+                }
+            }
         }
+    }
+
+    func leaderboardBannerError(for scope: LeaderboardScope) -> String? {
+        guard snapshot(for: scope)?.entries.isEmpty == true else { return nil }
+        guard let lastError else { return nil }
+        if lastError.contains("[HTTP 500]") {
+            return "Leaderboard is temporarily unavailable. Pull down to refresh."
+        }
+        if lastError.contains("[HTTP 429]") {
+            return "You're refreshing too quickly. Wait a moment and try again."
+        }
+        return lastError
     }
 
     func snapshot(for scope: LeaderboardScope) -> LeaderboardSnapshot? {

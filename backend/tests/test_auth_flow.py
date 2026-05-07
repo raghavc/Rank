@@ -53,6 +53,8 @@ async def test_signup_login_me_roundtrip(client: AsyncClient) -> None:
     body = resp.json()
     assert body["token_type"] == "bearer"
     assert body["access_token"]
+    assert body["refresh_token"]
+    assert body["expires_in"] == 15 * 60
     assert body["age_bucket"] in ("25-29", "30-34")
     assert body["username"].count("-") == 2  # adjective-animal-NNNN
 

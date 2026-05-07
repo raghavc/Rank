@@ -1,0 +1,6 @@
+// Local overrides (gitignored): copy Local.xcconfig.example -> Local.xcconfig
+//
+// IMPORTANT: URLs must be double-quoted — bare http://... is truncated at // because
+// // starts an xcconfig line comment.
+RANK_API_BASE_URL = "http://127.0.0.1:8000"
+#include? "Local.xcconfig"

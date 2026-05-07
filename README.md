@@ -47,7 +47,11 @@ The API is now serving on `http://localhost:8000` with a Celery worker + beat sc
 make ios          # opens RichRank.xcodeproj
 ```
 
-In Xcode, pick any iPhone simulator and press Run. The app reads `RankAPIBaseURL` from `Info.plist` (default `http://localhost:8000`), so the simulator hits the local API directly.
+In Xcode, pick any iPhone simulator and press Run. Debug builds inject `RankAPIBaseURL` from `Config/Debug.xcconfig` (`http://127.0.0.1:8000`). URLs there must be **double-quoted**; otherwise xcconfig treats `//` as a comment and the host/port is chopped off (requests wrongly go to port 80).
+
+**Physical device:** copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` (gitignored) and set `RANK_API_BASE_URL` to `http://<your-mac-LAN-ip>:8000`. On a phone, `localhost` is the device itself, not your computer.
+
+Release builds use `Config/Release.xcconfig`; replace the placeholder production URL before shipping.
 
 ### End-to-end Teller test
 
@@ -76,7 +80,7 @@ docker compose exec worker python -c "from app.workers.refresh_balances import r
 
 A mismatch here (sandbox institution + `development` server env, etc.) produces confusing failures before or during `/accounts` linkage.
 
-Production hardening omitted in this codebase (see [Connect signing](https://teller.io/docs/guides/connect)): Teller recommends a **server-issued nonce** and **Ed25519 verification** of enrollment `signatures`. For embedded iOS WKWebViews, consider Teller's first-party [TellerKit](https://github.com/tellerhq/tellerkit) if you migrate off `connect.js` in WKWebView.
+When `TELLER_CONNECT_SIGNING_PUBLIC_KEY` is set in `.env`, the API issues a **server nonce** for Connect and verifies enrollment **Ed25519 signatures** on `/bank/link` (see [Connect signing](https://teller.io/docs/guides/connect)). For native iOS you may also evaluate Teller’s [TellerKit](https://github.com/tellerhq/tellerkit) instead of embedding `connect.js` in WKWebView.
 
 ## Inspecting Postgres (Docker)
 
@@ -141,6 +145,12 @@ RichRank/
 ## Notes & TODOs
 
 - Set `TELLER_APP_ID` in `.env`. Without it, `POST /bank/connect-token` and the iOS Connect sheet won't load a real institution list.
-- `slowapi` rate limiting is in-process; for multi-instance deploys, wire it to the Redis backend.
+- **Teller Connect signing (recommended for production):** set `TELLER_CONNECT_SIGNING_PUBLIC_KEY` to the **Token Signing** public key (PEM) from the Teller dashboard. When set, `POST /bank/connect-token` returns a server-issued `nonce` (stored in Redis ~15m); the iOS client passes it into Connect and `/bank/link` verifies Teller’s `signatures` over `nonce`, `accessToken`, `user.id`, `enrollment.id`, and `environment` (see [Connect docs](https://teller.io/docs/guides/connect)). Omit the env var only for local/dev without signature enforcement.
+- **Auth:** access JWTs are short-lived (`JWT_ACCESS_TTL_MINUTES`, default 15). Clients receive a **refresh token** (stored hashed in Postgres) and should call `POST /auth/refresh`. `POST /auth/logout` with a bearer token revokes **all** refresh sessions and bumps `token_version` so existing access JWTs stop working; send `{"refresh_token":"..."}` to revoke a single session.
+- **CORS / hosts:** leave `CORS_ORIGINS` empty for iOS-only. Set `TRUSTED_HOSTS` behind a reverse proxy. Terminate TLS at the load balancer and enable **HSTS** there.
+- **Rate limits:** `slowapi` limits auth + bank + leaderboard routes. For multiple API replicas, set `RATE_LIMIT_STORAGE_URI` (e.g. `redis://redis:6379/1`).
+- `slowapi` defaults to in-memory storage when `RATE_LIMIT_STORAGE_URI` is unset.
 - `crypto.py` uses AES-256-GCM. The `TELLER_TOKEN_ENC_KEY` must be 32 raw bytes, base64-encoded — rotating it invalidates every stored Teller token.
 - The daily refresh runs at 04:00 UTC. Adjust in `app/workers/celery_app.py`.
+- **Production Compose reference:** [docker-compose.prod.yml](docker-compose.prod.yml) (no code bind-mount, no `--reload`, DB/Redis not published). Dev stack keeps hot-reload via [docker-compose.yml](docker-compose.yml).
+- **Secret scanning:** see [.github/workflows/secrets.yml](../../.github/workflows/secrets.yml) and [docs/SECURITY_SECRETS.md](../../docs/SECURITY_SECRETS.md).

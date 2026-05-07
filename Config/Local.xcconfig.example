@@ -1,0 +1,3 @@
+// Copy to Local.xcconfig (gitignored). Include quotes so // is not an xcconfig comment.
+//
+// RANK_API_BASE_URL = "http://192.168.1.23:8000"

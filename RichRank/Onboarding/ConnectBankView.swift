@@ -60,10 +60,28 @@ struct ConnectBankView: View {
                 TellerConnectSheet(
                     applicationId: info.applicationId,
                     environment: info.environment,
+                    connectNonce: info.nonce,
                     onResult: handle
                 )
             }
         }
+    }
+
+    private func describeConnectFailure(_ error: Error) -> String {
+        let base = (error as? APIError)?.localizedDescription ?? error.localizedDescription
+#if DEBUG
+        if let api = error as? APIError, case .transport = api {
+            return """
+            \(base)
+
+            (Debug) Pointing at your local Rank API (sandbox). Run `make up` so the API is on port 8000, \
+            use the Debug scheme, and keep `Config/Debug.xcconfig` as-is for the simulator. \
+            On a physical iPhone, copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` \
+            and set `RANK_API_BASE_URL` to http://<your-Mac-LAN-IP>:8000.
+            """
+        }
+#endif
+        return base
     }
 
     private func bullet(_ text: String) -> some View {
@@ -84,7 +102,7 @@ struct ConnectBankView: View {
                 connectInfo = info
                 showSheet = true
             } catch {
-                errorMessage = (error as? APIError)?.localizedDescription ?? error.localizedDescription
+                errorMessage = describeConnectFailure(error)
             }
             isWorking = false
         }
@@ -108,6 +126,7 @@ struct ConnectBankView: View {
     }
 
     private func handle(_ result: TellerConnectResult) {
+        let nonce = connectInfo?.nonce
         switch result {
         case .success(let enrollment):
             isWorking = true
@@ -118,7 +137,11 @@ struct ConnectBankView: View {
                         accountId: enrollment.accountId,
                         institutionName: enrollment.institutionName,
                         lastFour: enrollment.lastFour,
-                        subtype: enrollment.subtype
+                        subtype: enrollment.subtype,
+                        tellerNonce: nonce,
+                        tellerUserId: enrollment.tellerUserId,
+                        tellerEnrollmentId: enrollment.tellerEnrollmentId,
+                        tellerSignatures: enrollment.tellerSignatures
                     )
                 } catch {
                     errorMessage = linkBankErrorDescription(error)

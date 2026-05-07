@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rank · Black Beans Corp.</title>
+  <meta name="description" content="Rank — a Black Beans Corp. product." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/landing/landing.css?v=3" />
+</head>
+<body>
+  <p class="announcement-strip" role="note">
+    <span class="announcement-strip__inner">Private beta</span>
+  </p>
+
+  <div class="site-shell">
+    <header class="site-header">
+      <a href="/" class="header-brand">Rank</a>
+    </header>
+
+    <main class="hero">
+      <div class="hero-pattern" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <h1 class="product-attribution">A Black Beans Corp. Product</h1>
+      </div>
+    </main>
+
+    <section class="board-band" aria-label="Leaderboard">
+      <div class="board">
+        <div class="board__header board-row" role="row">
+          <div class="board__header-inner">
+            <span class="board-header-glyph-spacer" aria-hidden="true"></span>
+            <span class="board-col board-col--name" role="columnheader">USERNAME</span>
+            <span class="board-col board-col--pipe" aria-hidden="true">|</span>
+            <span class="board-col board-col--bal" role="columnheader">BALANCE</span>
+          </div>
+        </div>
+        <div class="board__body">
+          <p class="board__status board__status--loading" id="board-status">Loading…</p>
+          <p class="board__error" id="board-error" hidden></p>
+          <div class="board__empty" id="board-empty" hidden>
+            <p class="board__empty-title">No rankings to show yet.</p>
+            <p class="board__empty-caption">Check back after balances sync.</p>
+          </div>
+          <div class="board__viewport" id="board-viewport" hidden>
+            <div class="board__track" id="board-track">
+              <div class="board__set" id="board-set-primary"></div>
+              <div class="board__set board__set--dup" id="board-set-dup" aria-hidden="true"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="site-footer">
+      <div class="footer-rule" aria-hidden="true"></div>
+      <p class="footer-line">© 2026 Black Beans Corp.</p>
+    </footer>
+  </div>
+  <script src="/static/landing/board.js?v=3" defer></script>
+</body>
+</html>

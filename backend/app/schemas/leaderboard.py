@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class LeaderboardEntry(BaseModel):
     rank: int
+    previous_rank: int | None = None
     username: str
     balance: Decimal
     delta_pct: float
@@ -20,6 +21,7 @@ class LeaderboardListResponse(BaseModel):
 
 class LeaderboardMe(BaseModel):
     rank: int | None
+    previous_rank: int | None = None
     total_users: int
     balance: Decimal
     previous_balance: Decimal

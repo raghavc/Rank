@@ -1,0 +1,4 @@
+// Set this to your real production API before shipping.
+// Double-quote URLs so // is not treated as an xcconfig comment.
+RANK_API_BASE_URL = "http://98.84.78.7:8000"
+INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO
