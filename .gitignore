@@ -1,0 +1,30 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+certs/*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+.eggs/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.xcworkspace/xcuserdata/
+
+# Celery Beat (local schedule DB)
+**/celerybeat-schedule*
+
+# OS
+.DS_Store
