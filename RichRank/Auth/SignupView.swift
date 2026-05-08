@@ -36,11 +36,15 @@ struct SignupView: View {
                 .padding(.top, 8)
 
             VStack(spacing: 16) {
-                fieldLabel("Username")
+                fieldLabel("Username (max 11 characters)")
                 TextField("dady", text: $username)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .textContentType(.username)
+                    .onChange(of: username) { _, newValue in
+                        let filtered = String(newValue.replacingOccurrences(of: " ", with: "").prefix(11))
+                        if filtered != newValue { username = filtered }
+                    }
                     .styledField()
 
                 fieldLabel("Email")

@@ -9,7 +9,7 @@ _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class SignupRequest(BaseModel):
-    username: str | None = Field(default=None, min_length=3, max_length=50)
+    username: str | None = Field(default=None, min_length=3, max_length=11)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     dob: date
@@ -20,8 +20,10 @@ class SignupRequest(BaseModel):
         if value is None:
             return None
         s = value.strip().lower()
-        if len(s) < 3 or len(s) > 50:
-            raise ValueError("username must be between 3 and 50 characters")
+        if len(s) < 3 or len(s) > 11:
+            raise ValueError("username must be between 3 and 11 characters")
+        if " " in s:
+            raise ValueError("username must not contain spaces")
         if _USERNAME_RE.fullmatch(s) is None:
             raise ValueError(
                 "username may only contain letters, digits, underscores, and hyphens"
